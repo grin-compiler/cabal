@@ -875,11 +875,11 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
 
     extStgStubObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension [objExtension] [libTargetDir]
-          (ModuleName.toFilePath x ++"_stub")
+          (ModuleName.toFilePath x ++"_capi_stub")
       | x <- allLibModules lib clbi ]
     extStgStubSharedObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension ["dyn_" ++ objExtension] [libTargetDir]
-          (ModuleName.toFilePath x ++"_stub")
+          (ModuleName.toFilePath x ++"_capi_stub")
       | x <- allLibModules lib clbi ]
     stubObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension [objExtension] [libTargetDir]
