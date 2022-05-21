@@ -798,13 +798,21 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
         sharedLibInstallPath = libInstallPath </>
                                mkSharedLibName (hostPlatform lbi) compiler_id uid
 
-    extStgStubObjs <- catMaybes <$> sequenceA
+    extStgCapiStubObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension [objExtension] [libTargetDir]
           (ModuleName.toFilePath x ++"_capi_stub")
       | x <- allLibModules lib clbi ]
-    extStgStubSharedObjs <- catMaybes <$> sequenceA
+    extStgCapiStubSharedObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension ["dyn_" ++ objExtension] [libTargetDir]
           (ModuleName.toFilePath x ++"_capi_stub")
+      | x <- allLibModules lib clbi ]
+    extStgAllStubObjs <- catMaybes <$> sequenceA
+      [ findFileWithExtension [objExtension] [libTargetDir]
+          (ModuleName.toFilePath x ++"_all_stub")
+      | x <- allLibModules lib clbi ]
+    extStgAllStubSharedObjs <- catMaybes <$> sequenceA
+      [ findFileWithExtension ["dyn_" ++ objExtension] [libTargetDir]
+          (ModuleName.toFilePath x ++"_all_stub")
       | x <- allLibModules lib clbi ]
     stubObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension [objExtension] [libTargetDir]
@@ -934,8 +942,11 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
         unless (null cObjs) $ do
           Ar.createArLibArchive verbosity lbi (vanillaLibFilePath -<.> (objExtension ++ "_cbits.a")) cLikeObjs
         -- stubs archive
-        unless (null extStgStubObjs) $ do
-          Ar.createArLibArchive verbosity lbi (vanillaLibFilePath -<.> (objExtension ++ "_stubs.a")) extStgStubObjs
+        unless (null extStgCapiStubObjs) $ do
+          Ar.createArLibArchive verbosity lbi (vanillaLibFilePath -<.> (objExtension ++ "_capi_stubs.a")) extStgCapiStubObjs
+        -- big stubs archive
+        unless (null extStgAllStubObjs) $ do
+          Ar.createArLibArchive verbosity lbi (vanillaLibFilePath -<.> (objExtension ++ "_all_stubs.a")) extStgAllStubObjs
         -------------------------
         Ar.createArLibArchive verbosity lbi vanillaLibFilePath staticObjectFiles
         whenGHCiLib $ do
@@ -964,8 +975,11 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
         unless (null cLikeSharedObjs) $ do
           Ar.createArLibArchive verbosity lbi (sharedLibFilePath -<.> ("dyn_" ++ objExtension ++ "_cbits.a")) cLikeSharedObjs
         -- stubs archive
-        unless (null extStgStubSharedObjs) $ do
-          Ar.createArLibArchive verbosity lbi (sharedLibFilePath -<.> ("dyn_" ++ objExtension ++ "_stubs.a")) extStgStubSharedObjs
+        unless (null extStgCapiStubSharedObjs) $ do
+          Ar.createArLibArchive verbosity lbi (sharedLibFilePath -<.> ("dyn_" ++ objExtension ++ "_capi_stubs.a")) extStgCapiStubSharedObjs
+        -- all stubs archive
+        unless (null extStgAllStubSharedObjs) $ do
+          Ar.createArLibArchive verbosity lbi (sharedLibFilePath -<.> ("dyn_" ++ objExtension ++ "_all_stubs.a")) extStgAllStubSharedObjs
         -------------------------
         runGhcProg ghcSharedLinkArgs
 
@@ -1983,13 +1997,15 @@ installLib verbosity lbi targetDir dynlibTargetDir _builtDir pkg lib clbi = do
   let copyVanillaStglib = do
         let libName = mkGenericStaticLibName (getHSLibraryName $ componentUnitId clbi)
         myInstall builtDir targetDir $ libName -<.> ".o_cbits.a"
-        myInstall builtDir targetDir $ libName -<.> ".o_stubs.a"
+        myInstall builtDir targetDir $ libName -<.> ".o_capi_stubs.a"
+        myInstall builtDir targetDir $ libName -<.> ".o_all_stubs.a"
 
   let copySharedStglib = do
         --let libName = mkGenericStaticLibName (getHSLibraryName $ componentUnitId clbi)
         let libName = mkGenericSharedLibName platform compiler_id (getHSLibraryName $ componentUnitId clbi)
         myInstall builtDir targetDir $ libName -<.> ".dyn_o_cbits.a"
-        myInstall builtDir targetDir $ libName -<.> ".dyn_o_stubs.a"
+        myInstall builtDir targetDir $ libName -<.> ".dyn_o_capi_stubs.a"
+        myInstall builtDir targetDir $ libName -<.> ".dyn_o_all_stubs.a"
 
   -- copy the built library files over:
   whenHasCode $ do
