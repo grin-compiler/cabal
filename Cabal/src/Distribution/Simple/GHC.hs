@@ -108,17 +108,16 @@ import Distribution.Pretty
 import Distribution.Utils.NubList
 import Distribution.Utils.Path
 import Language.Haskell.Extension
-import Data.Containers.ListUtils (nubOrd)
 
 import Control.Monad (msum, forM_)
 import Data.Char (isLower)
 import qualified Data.Map as Map
 import System.Directory
          ( doesFileExist, getAppUserDataDirectory, createDirectoryIfMissing
-         , canonicalizePath, removeFile, renameFile, getDirectoryContents, getCurrentDirectory )
+         , canonicalizePath, removeFile, renameFile, getDirectoryContents )
 import System.FilePath          ( (</>), (<.>), (-<.>), takeExtension
                                 , takeDirectory, replaceExtension
-                                , isRelative, normalise)
+                                , isRelative )
 import qualified System.Info
 #ifndef mingw32_HOST_OS
 import System.Posix (createSymbolicLink)
@@ -939,7 +938,7 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
 
       whenVanillaLib False $ do
         -- cbits archive
-        let cLikeObjs = map (libTargetDir </>) cObjs
+        let cLikeObjsPath = map (libTargetDir </>) cLikeObjs
         unless (null cLikeObjs) $ do
           Ar.createArLibArchive verbosity lbi (vanillaLibFilePath -<.> (objExtension ++ "_cbits.a")) cLikeObjsPath
         -- stubs archive
@@ -972,7 +971,7 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
 
       whenSharedLib False $ do
         -- cbits archive
-        let cLikeSharedObjs = map (libTargetDir </>) cSharedObjs
+        let cLikeSharedObjsPath = map (libTargetDir </>) cLikeSharedObjs
         unless (null cLikeSharedObjsPath) $ do
           Ar.createArLibArchive verbosity lbi (sharedLibFilePath -<.> ("dyn_" ++ objExtension ++ "_cbits.a")) cLikeSharedObjsPath
         -- stubs archive
