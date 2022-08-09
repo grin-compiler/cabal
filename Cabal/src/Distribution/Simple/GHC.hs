@@ -881,11 +881,11 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
 
     extStgStubObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension [objExtension] [libTargetDir]
-          (ModuleName.toFilePath x ++"_stub")
+          (ModuleName.toFilePath x ++"_capi_stub")
       | x <- allLibModules lib clbi ]
     extStgStubSharedObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension ["dyn_" ++ objExtension] [libTargetDir]
-          (ModuleName.toFilePath x ++"_stub")
+          (ModuleName.toFilePath x ++"_capi_stub")
       | x <- allLibModules lib clbi ]
     stubObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension [objExtension] [libTargetDir]
@@ -1044,7 +1044,11 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
             ghciProfLibFilePath profObjectFiles
 
       whenSharedLib False $ do
+        -- modpak: modpak archive
+        modpakFiles <- Internal.getHaskellObjects implInfo lib lbi clbi libTargetDir (objExtension ++ "_modpak") True
         let cLikeSharedObjsPath = map (libTargetDir </>) cLikeSharedObjs
+            modules = map prettyShow $ explicitLibModules lib
+        writeStgLib libBi clbi cLikeSharedObjs cLikeFiles modpakFiles modules (sharedLibFilePath -<.> (objExtension ++ "_stglib"))
         -- cbits archive
         unless (null cLikeSharedObjsPath) $ do
           Ar.createArLibArchive verbosity lbi (sharedLibFilePath -<.> ("dyn_" ++ objExtension ++ "_cbits.a")) cLikeSharedObjsPath
