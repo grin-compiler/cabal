@@ -817,12 +817,20 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
       [ findFileWithExtension ["dyn_" ++ objExtension] [libTargetDir]
           (ModuleName.toFilePath x ++"_capi_stub")
       | x <- allLibModules lib clbi ]
+    extStgCapiStubProfObjs <- catMaybes <$> sequenceA
+      [ findFileWithExtension ["p_" ++ objExtension] [libTargetDir]
+          (ModuleName.toFilePath x ++"_capi_stub")
+      | x <- allLibModules lib clbi ]
     extStgAllStubObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension [objExtension] [libTargetDir]
           (ModuleName.toFilePath x ++"_all_stub")
       | x <- allLibModules lib clbi ]
     extStgAllStubSharedObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension ["dyn_" ++ objExtension] [libTargetDir]
+          (ModuleName.toFilePath x ++"_all_stub")
+      | x <- allLibModules lib clbi ]
+    extStgAllStubProfObjs <- catMaybes <$> sequenceA
+      [ findFileWithExtension ["p_" ++ objExtension] [libTargetDir]
           (ModuleName.toFilePath x ++"_all_stub")
       | x <- allLibModules lib clbi ]
     stubObjs <- catMaybes <$> sequenceA
@@ -966,12 +974,16 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
             ghciLibFilePath staticObjectFiles
 
       whenProfLib $ do
-        {-
-        -- TODO: make this complete, handle profile mode modpaks and cbits archives
-        unless (null cProfObjs) $ do
-          let cLikeProfObjs = map (libTargetDir </>) cProfObjs
-          Ar.createArLibArchive verbosity lbi (profileLibFilePath -<.> ".cbits.a") cLikeProfObjs
-        -}
+        -- cbits archive
+        let cLikeProfObjsPath = map (libTargetDir </>) cLikeProfObjs
+        unless (null cLikeProfObjsPath) $ do
+          Ar.createArLibArchive verbosity lbi (profileLibFilePath -<.> ("p_" ++ objExtension ++ "_cbits.a")) cLikeProfObjsPath
+        -- stubs archive
+        unless (null extStgCapiStubObjs) $ do
+          Ar.createArLibArchive verbosity lbi (profileLibFilePath -<.> ("p_" ++ objExtension ++ "_capi_stubs.a")) extStgCapiStubProfObjs
+        -- big stubs archive
+        unless (null extStgAllStubObjs) $ do
+          Ar.createArLibArchive verbosity lbi (profileLibFilePath -<.> ("p_" ++ objExtension ++ "_all_stubs.a")) extStgAllStubProfObjs
         -------------------------
         Ar.createArLibArchive verbosity lbi profileLibFilePath profObjectFiles
         whenGHCiLib $ do
@@ -2022,7 +2034,7 @@ installLib verbosity lbi targetDir dynlibTargetDir _builtDir pkg lib clbi = do
 
   catch copyModpaks handleCopyEx
 
-  let myInstall srcDir dstDir name = do
+  let installIfExists srcDir dstDir name = do
         let src = srcDir </> name
             dst = dstDir </> name
         exists <- doesFileExist src
@@ -2031,16 +2043,22 @@ installLib verbosity lbi targetDir dynlibTargetDir _builtDir pkg lib clbi = do
           installOrdinaryFile verbosity src dst
 
   let copyVanillaCbits = do
-        let libName = mkGenericStaticLibName (getHSLibraryName $ componentUnitId clbi)
-        myInstall builtDir targetDir $ libName -<.> ".o_cbits.a"
-        myInstall builtDir targetDir $ libName -<.> ".o_capi_stubs.a"
-        myInstall builtDir targetDir $ libName -<.> ".o_all_stubs.a"
+        let name = mkLibName uid
+        installIfExists builtDir targetDir $ name -<.> ".o_cbits.a"
+        installIfExists builtDir targetDir $ name -<.> ".o_capi_stubs.a"
+        installIfExists builtDir targetDir $ name -<.> ".o_all_stubs.a"
 
   let copySharedCbits = do
-        let libName = mkGenericSharedLibName platform compiler_id (getHSLibraryName $ componentUnitId clbi)
-        myInstall builtDir targetDir $ libName -<.> ".dyn_o_cbits.a"
-        myInstall builtDir targetDir $ libName -<.> ".dyn_o_capi_stubs.a"
-        myInstall builtDir targetDir $ libName -<.> ".dyn_o_all_stubs.a"
+        let name = mkSharedLibName (hostPlatform lbi) compiler_id uid
+        installIfExists builtDir targetDir $ name -<.> ".dyn_o_cbits.a"
+        installIfExists builtDir targetDir $ name -<.> ".dyn_o_capi_stubs.a"
+        installIfExists builtDir targetDir $ name -<.> ".dyn_o_all_stubs.a"
+
+  let copyProfCbits = do
+        let name = mkProfLibName uid
+        installIfExists builtDir targetDir $ name -<.> ".p_o_cbits.a"
+        installIfExists builtDir targetDir $ name -<.> ".p_o_capi_stubs.a"
+        installIfExists builtDir targetDir $ name -<.> ".p_o_all_stubs.a"
 
   -- copy the built library files over:
   whenHasCode $ do
@@ -2056,6 +2074,7 @@ installLib verbosity lbi targetDir dynlibTargetDir _builtDir pkg lib clbi = do
                 ]
       whenGHCi $ installOrdinary builtDir targetDir ghciLibName
     whenProf $ do
+      catch copyProfCbits handleCopyEx
       installOrdinary builtDir targetDir profileLibName
       whenGHCi $ installOrdinary builtDir targetDir ghciProfLibName
     whenShared $ if
