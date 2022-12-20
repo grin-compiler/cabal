@@ -117,7 +117,7 @@ import System.Directory
          ( doesFileExist, getAppUserDataDirectory, createDirectoryIfMissing
          , canonicalizePath, removeFile, renameFile, getDirectoryContents
          , makeRelativeToCurrentDirectory )
-import System.FilePath          ( (</>), (<.>), takeExtension
+import System.FilePath          ( (</>), (<.>), (-<.>), takeExtension
                                 , takeDirectory, replaceExtension
                                 ,isRelative )
 import qualified System.Info
@@ -809,6 +809,22 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
         sharedLibInstallPath = libInstallPath </>
                                mkSharedLibName (hostPlatform lbi) compiler_id uid
 
+    extStgCapiStubObjs <- catMaybes <$> sequenceA
+      [ findFileWithExtension [objExtension] [libTargetDir]
+          (ModuleName.toFilePath x ++"_capi_stub")
+      | x <- allLibModules lib clbi ]
+    extStgCapiStubSharedObjs <- catMaybes <$> sequenceA
+      [ findFileWithExtension ["dyn_" ++ objExtension] [libTargetDir]
+          (ModuleName.toFilePath x ++"_capi_stub")
+      | x <- allLibModules lib clbi ]
+    extStgAllStubObjs <- catMaybes <$> sequenceA
+      [ findFileWithExtension [objExtension] [libTargetDir]
+          (ModuleName.toFilePath x ++"_all_stub")
+      | x <- allLibModules lib clbi ]
+    extStgAllStubSharedObjs <- catMaybes <$> sequenceA
+      [ findFileWithExtension ["dyn_" ++ objExtension] [libTargetDir]
+          (ModuleName.toFilePath x ++"_all_stub")
+      | x <- allLibModules lib clbi ]
     stubObjs <- catMaybes <$> sequenceA
       [ findFileWithExtension [objExtension] [libTargetDir]
           (ModuleName.toFilePath x ++"_stub")
@@ -932,6 +948,17 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
       info verbosity (show (ghcOptPackages ghcSharedLinkArgs))
 
       whenVanillaLib False $ do
+        -- cbits archive
+        let cLikeObjsPath = map (libTargetDir </>) cLikeObjs
+        unless (null cLikeObjs) $ do
+          Ar.createArLibArchive verbosity lbi (vanillaLibFilePath -<.> (objExtension ++ "_cbits.a")) cLikeObjsPath
+        -- stubs archive
+        unless (null extStgCapiStubObjs) $ do
+          Ar.createArLibArchive verbosity lbi (vanillaLibFilePath -<.> (objExtension ++ "_capi_stubs.a")) extStgCapiStubObjs
+        -- big stubs archive
+        unless (null extStgAllStubObjs) $ do
+          Ar.createArLibArchive verbosity lbi (vanillaLibFilePath -<.> (objExtension ++ "_all_stubs.a")) extStgAllStubObjs
+        -------------------------
         Ar.createArLibArchive verbosity lbi vanillaLibFilePath staticObjectFiles
         whenGHCiLib $ do
           (ldProg, _) <- requireProgram verbosity ldProgram (withPrograms lbi)
@@ -939,13 +966,31 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
             ghciLibFilePath staticObjectFiles
 
       whenProfLib $ do
+        {-
+        -- TODO: make this complete, handle profile mode modpaks and cbits archives
+        unless (null cProfObjs) $ do
+          let cLikeProfObjs = map (libTargetDir </>) cProfObjs
+          Ar.createArLibArchive verbosity lbi (profileLibFilePath -<.> ".cbits.a") cLikeProfObjs
+        -}
+        -------------------------
         Ar.createArLibArchive verbosity lbi profileLibFilePath profObjectFiles
         whenGHCiLib $ do
           (ldProg, _) <- requireProgram verbosity ldProgram (withPrograms lbi)
           Ld.combineObjectFiles verbosity lbi ldProg
             ghciProfLibFilePath profObjectFiles
 
-      whenSharedLib False $
+      whenSharedLib False $ do
+        -- cbits archive
+        let cLikeSharedObjsPath = map (libTargetDir </>) cLikeSharedObjs
+        unless (null cLikeSharedObjsPath) $ do
+          Ar.createArLibArchive verbosity lbi (sharedLibFilePath -<.> ("dyn_" ++ objExtension ++ "_cbits.a")) cLikeSharedObjsPath
+        -- stubs archive
+        unless (null extStgCapiStubSharedObjs) $ do
+          Ar.createArLibArchive verbosity lbi (sharedLibFilePath -<.> ("dyn_" ++ objExtension ++ "_capi_stubs.a")) extStgCapiStubSharedObjs
+        -- all stubs archive
+        unless (null extStgAllStubSharedObjs) $ do
+          Ar.createArLibArchive verbosity lbi (sharedLibFilePath -<.> ("dyn_" ++ objExtension ++ "_all_stubs.a")) extStgAllStubSharedObjs
+        -------------------------
         runGhcProg ghcSharedLinkArgs
 
       whenStaticLib False $
@@ -1966,9 +2011,41 @@ installLib verbosity lbi targetDir dynlibTargetDir _builtDir pkg lib clbi = do
   whenProf    $ copyModuleFiles "p_hi"
   whenShared  $ copyModuleFiles "dyn_hi"
 
+  let copyModpaks = do
+        -- copy .modpak files over:
+        whenVanilla $ copyModuleFiles "o_modpak"
+        whenProf    $ copyModuleFiles "p_o_modpak"
+        whenShared  $ copyModuleFiles "dyn_o_modpak"
+
+      handleCopyEx :: SomeException -> IO ()
+      handleCopyEx _ = pure ()
+
+  catch copyModpaks handleCopyEx
+
+  let myInstall srcDir dstDir name = do
+        let src = srcDir </> name
+            dst = dstDir </> name
+        exists <- doesFileExist src
+        when exists $ do
+          createDirectoryIfMissingVerbose verbosity True dstDir
+          installOrdinaryFile verbosity src dst
+
+  let copyVanillaCbits = do
+        let libName = mkGenericStaticLibName (getHSLibraryName $ componentUnitId clbi)
+        myInstall builtDir targetDir $ libName -<.> ".o_cbits.a"
+        myInstall builtDir targetDir $ libName -<.> ".o_capi_stubs.a"
+        myInstall builtDir targetDir $ libName -<.> ".o_all_stubs.a"
+
+  let copySharedCbits = do
+        let libName = mkGenericSharedLibName platform compiler_id (getHSLibraryName $ componentUnitId clbi)
+        myInstall builtDir targetDir $ libName -<.> ".dyn_o_cbits.a"
+        myInstall builtDir targetDir $ libName -<.> ".dyn_o_capi_stubs.a"
+        myInstall builtDir targetDir $ libName -<.> ".dyn_o_all_stubs.a"
+
   -- copy the built library files over:
   whenHasCode $ do
     whenVanilla $ do
+      catch copyVanillaCbits handleCopyEx
       sequence_ [ installOrdinary
                     builtDir
                     targetDir
@@ -1985,12 +2062,14 @@ installLib verbosity lbi targetDir dynlibTargetDir _builtDir pkg lib clbi = do
       -- The behavior for "extra-bundled-libraries" changed in version 2.5.0.
       -- See ghc issue #15837 and Cabal PR #5855.
       | specVersion pkg < CabalSpecV3_0 -> do
+        catch copySharedCbits handleCopyEx
         sequence_ [ installShared builtDir dynlibTargetDir
               (mkGenericSharedLibName platform compiler_id (l ++ f))
           | l <- getHSLibraryName uid : extraBundledLibs (libBuildInfo lib)
           , f <- "":extraDynLibFlavours (libBuildInfo lib)
           ]
       | otherwise -> do
+        catch copySharedCbits handleCopyEx
         sequence_ [ installShared
                         builtDir
                         dynlibTargetDir
