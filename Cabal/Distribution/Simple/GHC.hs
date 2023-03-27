@@ -115,7 +115,8 @@ import Data.Char (isLower)
 import qualified Data.Map as Map
 import System.Directory
          ( doesFileExist, getAppUserDataDirectory, createDirectoryIfMissing
-         , canonicalizePath, removeFile, renameFile, getDirectoryContents )
+         , canonicalizePath, removeFile, renameFile, getDirectoryContents
+         , doesDirectoryExist )
 import System.FilePath          ( (</>), (<.>), takeExtension
                                 , takeDirectory, replaceExtension
                                 ,isRelative )
@@ -1922,6 +1923,9 @@ installLib verbosity lbi targetDir dynlibTargetDir _builtDir pkg lib clbi = do
   whenProf    $ copyModuleFiles "p_hi"
   whenShared  $ copyModuleFiles "dyn_hi"
 
+  -- copy extra compilation artifacts that ghc plugins may produce
+  copyDirectoryIfExists "extra-compilation-artifacts"
+
   -- copy the built library files over:
   whenHasCode $ do
     whenVanilla $ do
@@ -1995,6 +1999,12 @@ installLib verbosity lbi targetDir dynlibTargetDir _builtDir pkg lib clbi = do
     copyModuleFiles ext =
       findModuleFilesEx verbosity [builtDir] [ext] (allLibModules lib clbi)
       >>= installOrdinaryFiles verbosity targetDir
+
+    copyDirectoryIfExists dirName = do
+      let src = builtDir  </> dirName
+          dst = targetDir </> dirName
+      dirExists <- doesDirectoryExist src
+      when dirExists $ copyDirectoryRecursive verbosity src dst
 
     compiler_id = compilerId (compiler lbi)
     platform = hostPlatform lbi
